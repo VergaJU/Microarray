@@ -21,7 +21,7 @@ RUN apt-get update --fix-missing && apt-get install -y apt-utils \
 
 FROM bioconductor/bioconductor_docker:devel
 
-RUN Rscript -e 'install.packages(c("rmarkdown", "tidyverse", "plyr", "pheatmap","ggpubr","gplots"), dependencies = TRUE, repos = "http://cran.us.r-project.org")'
-RUN Rscript -e 'BiocManager::install(c("limma","Biobase", "illuminaHumanv4.db","GEOquery","sva","RankProd"))'
+RUN Rscript -e 'install.packages(c("rmarkdown","markdown", "tidyverse", "plyr", "pheatmap","ggpubr","gplots","DT"), dependencies = TRUE, repos = "http://cran.us.r-project.org")'
+RUN Rscript -e 'BiocManager::install(c("limma","Biobase", "illuminaHumanv4.db","GEOquery","sva","RankProd","preprocessCore"))'
 RUN Rscript -e 'BiocManager::install("GEOquery")'
 WORKDIR /rstudio

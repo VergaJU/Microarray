@@ -1,0 +1,93 @@
+---
+title: "sve_DESeq2"
+author: "Jacopo Umberto Verga"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# DESeq2
+
+Test perforamces DESeq2 with the pseudobulk counts obtained previously corrected by the batch effect using combat.
+
+
+```{r message=FALSE, warning=FALSE}
+library(sva)
+library(plyr)
+library(RankProd)
+library(tidyverse)
+library(pheatmap)
+library(RColorBrewer)
+library(preprocessCore)
+```
+
+Load counts and experiment design
+
+```{r message=FALSE, warning=FALSE}
+counts <- read.csv("Pseudobulk.csv", row.names = "Symbol")
+exp_design <- read.csv("Experiment_design.csv", row.names = "Sample")
+```
+
+```{r message=FALSE, warning=FALSE}
+cts <- as.matrix(counts)
+
+#exp_design$Condition <- factor(exp_design$Condition)
+#exp_design$Batch <- factor(exp_design$Batch)
+
+batches_unique = unique(sort(exp_design$Batch))
+batches = exp_design$Batch
+batches <- mapvalues(batches, from = batches_unique, to = c (1, 2, 3, 4, 5, 6))
+
+exp_design$batch_num <- batches
+todrop = rownames(exp_design[exp_design$batch_num == 3,])
+exp_design <- exp_design[!(row.names(exp_design) %in% todrop),]
+cts <- cts[,colnames(cts)!= todrop]
+batches = exp_design$batch_num
+batches <- as.numeric(batches)
+
+cl_unique = unique(sort(exp_design$Condition))
+cl = exp_design$Condition
+cl = mapvalues(cl, from = cl_unique, to = c(0,1))
+
+```
+
+
+
+
+```{r}
+cts_num <- matrix(as.numeric(cts),    # Convert to numeric matrix
+                  ncol = ncol(cts))
+rownames(cts_num) <- rownames(cts)
+colnames(cts_num) <- colnames(cts)
+dim(cts_num)
+```
+
+```{r}
+norm= normalize.quantiles.robust(cts_num, copy = TRUE)
+rownames(norm)=rownames(cts)
+colnames(norm)=colnames(cts)
+```
+
+
+```{r}
+adjusted <- ComBat_seq(norm, batch=batches, group=NULL)
+```
+
+
+
+
+
+
+
+```{r}
+DEGenes = RankProducts(adjusted, cl=cl, logged =TRUE, na.rm = TRUE, 
+                       gene.names = rownames(norm),plot = FALSE,
+                       rand = 123)
+```
+
+
+
+
