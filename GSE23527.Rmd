@@ -32,7 +32,7 @@ gset1 <- gse[[idx]]
 if (length(gse) > 1) idx <- grep("GPL10415", attr(gse, "names")) else idx <- 1
 gset2 <- gse[[idx]]
 
-gset = gset2
+gset = gset1
 ```
 
 ```{r}
@@ -48,7 +48,7 @@ features
 
 ```{r}
 # coding subtypes, 0 = YOUNG, 1 = MIDDLE AGE, 2 = OLD
-gsms <- "000010022222"
+gsms <- "111111111111000000000000"
 sml <- strsplit(gsms, split="")[[1]]
 ```
 
@@ -69,7 +69,7 @@ exprs(gset) <- log2(ex) } # i think this code is trying to determine whether the
 
 
 gs <- factor(sml)
-groups <- make.names(c("YOUNG","MIDDLE","OLD"))
+groups <- make.names(c("OLD","YOUNG"))
 levels(gs) <- groups
 gset$group <- gs
 ord <- order(gs)  # order samples by group
@@ -150,7 +150,7 @@ colnames(fit2[["coefficients"]])
 ```{r}
 
 #Create the top table for the comparison (coef) we want
-top <- topTable(fit2, coef=3, adjust.method = "fdr", sort.by="B", number = Inf)
+top <- topTable(fit2, coef=2, adjust.method = "fdr", sort.by="B", number = Inf)
 nrow(top)
 ```
 
@@ -163,7 +163,7 @@ nrow(up_reg_epi)
 ```{r}
 #Create an excel-readable table with the specified columns for sig gene only
 tT <- subset(up_reg_epi, select=c("miRNA_ID","logFC","adj.P.Val","P.Value","t"))
-write.table(tT, "DEG_list_GSE23527_GPL10415_Old_vs_Young.csv", row.names=F, sep="\t")
+write.table(tT, "DEG_list_GSE23527_GPL10358_Young_vs_Old.csv", row.names=F, sep="\t")
 
 #Sanity check - hist of all P vals
 hist(top$adj.P.Val, col = "grey", border = "white", xlab = "P-adj",

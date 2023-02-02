@@ -23,7 +23,7 @@ library(dplyr)
 
 ```{r}
 my_id <- "GSE87105"
-gse <- getGEO(my_id, GSEMatrix =TRUE)
+gse <- getGEO(my_id)#, GSEMatrix =TRUE)
 ```
 ```{r}
 if (length(gse) > 1) idx <- grep("GPL10558", attr(gse, "names")) else idx <- 1
@@ -179,7 +179,7 @@ colnames(fit2[["coefficients"]])
 ```{r}
 
 #Create the top table for the comparison (coef) we want
-top <- topTable(fit2, coef=1, adjust.method = "fdr", sort.by="B", number = Inf)
+top <- topTable(fit2, coef=3, adjust.method = "fdr", sort.by="B", number = Inf)
 nrow(top)
 ```
 
@@ -192,7 +192,7 @@ nrow(up_reg_epi)
 ```{r}
 #Create an excel-readable table with the specified columns for sig gene only
 tT <- subset(up_reg_epi, select=c("Symbol","logFC","adj.P.Val","P.Value","t"))
-write.table(tT, "DEG_list_GSE87105_Young_vs_Middle.csv", row.names=F, sep="\t")
+write.table(tT, "DEG_list_GSE87105_Old_vs_Young.csv", row.names=F, sep="\t")
 
 #Sanity check - hist of all P vals
 hist(top$adj.P.Val, col = "grey", border = "white", xlab = "P-adj",
@@ -212,8 +212,8 @@ sig_exprs <- e[rownames(e) %in% as.character(tT$ID),]
 ```
 
 ```{r}
-library(DT)
-DT::datatable(up_reg_epi, rownames = FALSE, options=list(scrollX=T))
+#library(DT)
+#::datatable(up_reg_epi, rownames = FALSE, options=list(scrollX=T))
 ```
 
 

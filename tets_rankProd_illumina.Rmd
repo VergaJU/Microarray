@@ -96,18 +96,18 @@ exp[,1] <- NULL
 
 
 
-norm= normalize.quantiles.robust(as.matrix(norm), copy = TRUE)
+norm= normalize.quantiles.robust(as.matrix(exp), copy = TRUE)
 norm = log2(norm)
 
 rownames(norm)=rownames(exp)
 colnames(norm)=colnames(exp)
 #log_norm = log2(norm)
-cl = gse$GSE87105_series_matrix.txt.gz$`age:ch1`
-cl <- mapvalues(cl, from = unique(cl), to = seq(length(unique(cl))))
-
+#cl = gse$GSE87105_series_matrix.txt.gz$`age:ch1`
+#cl <- mapvalues(cl, from = unique(cl), to = seq(length(unique(cl))))
+cl = c(1,1,1,1,1,2,2,2,2,3,3,3,3,3,3,3)
 Y = norm[,1:5]
-M = norm[,6:10]
-O = norm[,11:16]
+M = norm[,6:9]
+O = norm[,10:16]
 YvO = cbind(Y,O)
 YvO_n <- matrix(as.numeric(as.matrix(YvO)),    # Convert to numeric matrix
                   ncol = ncol(YvO))
@@ -119,7 +119,7 @@ cl_YvO = cl[!cl == 2]
 
 ```{r}
 
-DEGenes = RankProducts(YvO_n, cl=cl_YvO, logged =TRUE, na.rm = TRUE, 
+DEGenes = RankProducts(as.matrix(YvO_n), cl=cl_YvO, logged =TRUE, na.rm = TRUE, 
                        gene.names = rownames(YvO_n),plot = FALSE,
                        rand = 123)
 
