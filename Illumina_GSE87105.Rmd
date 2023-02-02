@@ -18,15 +18,26 @@ library(limma)
 library(gplots)
 library(dplyr)
 ```
+## Getting the data
 
+For this part, the first thing is to analyze the experiment and the chipset used so I can map the names and the classes that the samples belong to. 
+
+```{r}
+experiment <- "GSE87105"
+chip <- "GPL10558"
+# coding subtypes, 0 = YOUNG, 1 = MIDDLE AGE, 2 = OLD
+s_classes <- "0000011112222222"
+class_names <- c("YOUNG","MIDDLE","OLD")
+```
 ## Importing the Data
 
 ```{r}
-my_id <- "GSE87105"
+
+my_id <- experiment
 gse <- getGEO(my_id)#, GSEMatrix =TRUE)
 ```
 ```{r}
-if (length(gse) > 1) idx <- grep("GPL10558", attr(gse, "names")) else idx <- 1
+if (length(gse) > 1) idx <- grep(chip, attr(gse, "names")) else idx <- 1
 gset <- gse[[idx]]
 ```
 
@@ -42,8 +53,8 @@ features
 ```
 
 ```{r}
-# coding subtypes, 0 = YOUNG, 1 = MIDDLE AGE, 2 = OLD
-gsms <- "0000011112222222"
+
+gsms <- s_classes
 sml <- strsplit(gsms, split="")[[1]]
 ```
 
@@ -64,7 +75,7 @@ exprs(gset) <- log2(ex) } # i think this code is trying to determine whether the
 
 
 gs <- factor(sml)
-groups <- make.names(c("YOUNG","MIDDLE","OLD"))
+groups <- make.names(class_names)
 levels(gs) <- groups
 gset$group <- gs
 ord <- order(gs)  # order samples by group
@@ -72,7 +83,7 @@ ord <- order(gs)  # order samples by group
 palette <- palette(c("#1B9E77", "#7570B3", "#E7298A", "#E6AB02", "#D95F02",
           "#66A61E", "#A6761D", "#B32424", "#B324B3", "#666666"))
 par(mar=c(7,4,2,1))
-title <- paste ("GSE37614", "/", annotation(gset), sep ="")
+title <- paste (experiment, "/", annotation(gset), sep ="")
 boxplot(log2(ex[,ord]), boxwex=0.6, notch=T, main=title, outline=FALSE, las=2, col=gs[ord])
 legend("topleft", groups, fill=palette(), bty="n")
 ```
@@ -173,30 +184,32 @@ cont.matrix <- makeContrasts(contrasts=cts, levels=design)
 fit2 <- contrasts.fit(fit, cont.matrix)
 fit2 <- eBayes(fit2, 0.01)
 # print contrasts order
-colnames(fit2[["coefficients"]])
+comparisons <-colnames(fit2[["coefficients"]])
 ```
+Now there is this function that will take all the analysis over each pair.
 
-```{r}
+```{r get_DE_analysis} 
 
-#Create the top table for the comparison (coef) we want
-top <- topTable(fit2, coef=3, adjust.method = "fdr", sort.by="B", number = Inf)
-nrow(top)
-```
-
-```{r}
-#Top Table of significant genes only
-up_reg_epi <- subset(top, adj.P.Val < 0.1)
-nrow(up_reg_epi)
-```
-
-```{r}
-#Create an excel-readable table with the specified columns for sig gene only
-tT <- subset(up_reg_epi, select=c("Symbol","logFC","adj.P.Val","P.Value","t"))
-write.table(tT, "DEG_list_GSE87105_Old_vs_Young.csv", row.names=F, sep="\t")
-
-#Sanity check - hist of all P vals
-hist(top$adj.P.Val, col = "grey", border = "white", xlab = "P-adj",
-     ylab = "Number of genes", main = "P-adj value distribution")
+DE_analysis <- function(comparison) {
+  coefficient_v =  which(comparisons ==comparison)
+  #Create the top table for the comparison (coef) we want
+  top <- topTable(fit2, coef=3, adjust.method = "fdr", sort.by="B", number = Inf)
+  nrow(top)
+  
+  #Top Table of significant genes only
+  up_reg_epi <- subset(top, adj.P.Val < 0.1)
+  nrow(up_reg_epi)
+  
+  #Create an excel-readable table with the specified columns for sig gene only
+  tT <- subset(up_reg_epi, select=c("Symbol","logFC","adj.P.Val","P.Value","t"))
+  filename = paste0("DEG_list_",experiment,"_",comparison, ".csv")
+  write.table(tT, filename, row.names=F, sep="\t")
+  
+  #Sanity check - hist of all P vals
+  hist(top$adj.P.Val, col = "grey", border = "white", xlab = "P-adj",
+       ylab = "Number of genes", main = "P-adj value distribution")
+}
+lapply(comparisons, DE_analysis)
 ```
 
 ```{r}
@@ -308,17 +321,3 @@ pheatmap(dists, col = (hmcol),
  -  Can the results from the initial study be replicated? If so/if not, something to talk about in the paper anyway!
  -  Data integration strategy
  -  The model itself
-
-# Checking to see if data has been imported properly with getGEO 
- 
-```{r}
-GSM923193 <- ex[,which(colnames(ex) == "GSM923193")]
-names(GSM923193) <- rownames(ex)
-length(GSM923193)
-```
-
-Look at value of probe ILMN_1343291 (62753.8 and 70911.3) in raw normalised data
-
-```{r}
-GSM923193[(names(GSM923193) == "ILMN_1343291")]
-```
