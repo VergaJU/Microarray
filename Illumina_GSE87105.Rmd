@@ -193,7 +193,7 @@ Now there is this function that will take all the analysis over each pair.
 DE_analysis <- function(comparison) {
   coefficient_v =  which(comparisons ==comparison)
   #Create the top table for the comparison (coef) we want
-  top <- topTable(fit2, coef=3, adjust.method = "fdr", sort.by="B", number = Inf)
+  top <- topTable(fit2, coef=coefficient_v, adjust.method = "fdr", sort.by="B", number = Inf)
   nrow(top)
   
   #Top Table of significant genes only

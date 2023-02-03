@@ -217,7 +217,7 @@ volcanoplot(fit2, coef=ct, main=colnames(fit2)[ct], pch=20,
 ```
 
 ```{r}
-ct <- 3
+ct <- 1
 # choose contrast of interest
 volcanoplot(fit2, coef=ct, main=colnames(fit2)[ct], pch=20,
             highlight=length(which(dT[,ct]!=0)), names=rep('+', nrow(fit2)))
@@ -238,7 +238,7 @@ abline(h=0)
 ```
 
 ```{r}
-ct <- 3
+ct <- 1
 plotMD(fit2, column=ct, status=dT[,ct], legend=F, pch=20, cex=1)
 abline(h=0)
 ```
