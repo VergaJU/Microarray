@@ -1,0 +1,417 @@
+---
+title: "test"
+output:
+  html_document: default
+  pdf_document: default
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#knitr::opts_chunk$set(echo = TRUE, eval=FALSE)
+
+```
+
+# llll
+From this one I will only take the expression of the selected genes.
+
+```{r import, echo=FALSE}
+library(illuminaHumanv4.db)
+library(ggpubr)
+library(GEOquery)
+library(limma)
+library(gplots)
+library(dplyr)
+library(tidyr)
+
+
+
+```
+
+## Importing the Data
+
+```{r getting_experiment,  echo=FALSE}
+my_id <- "GSE8157"
+gse <- getGEO(my_id, GSEMatrix =TRUE)
+```
+
+Getting the samples from platform GPL570 from the experiment (in the bioproject)
+```{r get_samples, echo=FALSE}
+if (length(gse) > 1) idx <- grep("GPL570", attr(gse, "names")) else idx <- 1
+gset <- gse[[idx]]
+
+
+```
+
+
+Seeing the metadata
+```{r metadata}
+pData(gset)
+fData(gset)
+fvarLabels(gset)
+```
+Seeing the headers of the metadata
+```{r headers}
+sample_data = pData(gset)
+colnames(sample_data)
+
+```
+
+Here we are not going to get the age but the poliquistic status
+```{r see_unique_categories}
+unique(sample_data$title)
+```
+
+In this case, characteristics_ch1.1 has the class in a compose string.  I will separate them in age, status (trained/sedentary) and one extra column age + status
+
+```{r clean_up}
+sample_data <- separate(sample_data, title, into = c("nothing", "status"), sep = "Muscle PCOS ")
+sample_data <- separate(sample_data, status, into = c("nothing", "status"), sep = "after ")
+sample_data <- separate(sample_data, status, into = c("status", "id"), sep = " ")
+sample_data$status[sample_data$status=="pioglitazone"] <- "after_pioglitazone"
+sample_data <- separate(sample_data, nothing, into = c("status_2", "id_2"), sep = " ")
+
+sample_data$id <- ifelse(is.na(sample_data$id), sample_data$id_2, sample_data$id)
+sample_data$status <- ifelse(is.na(sample_data$status), sample_data$status_2, sample_data$status)
+```
+
+Now I have age, status and age_class that has both
+```{r check_cleanup}
+unique(sample_data$age)
+unique(sample_data$status)
+unique(sample_data$age_class)
+
+```
+
+Getting the microarray ID's data (like the gene name)
+```{r sample_metadata}
+fvarLabels(gset) <- make.names(fvarLabels(gset))
+features <- fData(gset)
+features
+```
+Here, I will need a function to take a column and gives me a vector, 0 is it is young, 1 if it is middle age and 2 if it is old
+```{r age_category_function}
+map_age <- function(age_category) {
+  age_vector <- ifelse(age_category == "Young", 0, ifelse(age_category == "Old", 2, 1))
+  return (paste(age_vector, collapse = ""))
+}
+
+```
+
+If we use it, we will get the mapped data
+
+```{r }
+# coding subtypes, 0 = YOUNG, 1 = MIDDLE AGE, 2 = OLD
+gsms <- map_age(sample_data$age)
+gsms #<- "111111111111000000000000"
+sml <- strsplit(gsms, split="")[[1]]
+```
+And this is to put the labels when we don't have them, but in this case we do
+```{r mapping}
+
+gs <- factor(sml)
+groups <- make.names(c("OLD","YOUNG"))
+levels(gs) <- groups
+gset$group <- gs
+```
+But since we did when we separated the title, we go with
+
+```{r}
+gset$group <- sample_data$age
+```
+
+## Check normalisation and scales used
+
+Log2 scale transformation required
+
+Check for normalisation by looking at boxplot of expression levels for each sample
+
+
+```{r }
+ex <- exprs(gset) # expression data, what form is this?
+qx <- as.numeric(quantile(ex, c(0., 0.25, 0.5, 0.75, 0.99, 1.0), na.rm=T))
+LogC <- (qx[5] > 100) ||
+  (qx[6]-qx[1] > 50 && qx[2] > 0)
+if (LogC) { ex[which(ex <= 0)] <- NaN
+exprs(gset) <- log2(ex) } # i think this code is trying to determine whether the data is in log2 format yet
+```
+
+And here we see how are the samples before any selection
+```{r boxplot1}
+
+ord <- order(gs)  # order samples by group
+
+palette <- palette(c("#1B9E77", "#7570B3", "#E7298A", "#E6AB02", "#D95F02",
+          "#66A61E", "#A6761D", "#B32424", "#B324B3", "#666666"))
+par(mar=c(7,4,2,1))
+title <- paste (my_id, "/", annotation(gset), sep ="")
+boxplot(log2(ex[,ord]), boxwex=0.6, notch=T, main=title, outline=FALSE, las=2, col=gs[ord])
+legend("topleft", groups, fill=palette(), bty="n")
+```
+
+
+```{r boxplot2}
+boxplot(log2(ex),range=0,ylab="log2 intensity")
+```
+
+
+## Probe filtering
+
+```{r }
+# expression value distribution
+par(mar=c(4,4,2,1))
+title <- paste ("Normalized Expression Density", sep ="")
+plotDensities(ex[,ord], group=gs, main=title, legend ="topright")
+```
+
+```{r}
+# Probe filtering
+medians <- rowMedians(ex)
+man_threshold <- 4 
+
+hist(medians, 150, col = "cornsilk1", freq = FALSE, 
+main = "Histogram of the median intensities", 
+border = "antiquewhite4",
+xlab = "Median intensities")
+```
+
+```{r}
+meta <- pData(gset)
+meta$group
+```
+
+```{r}
+no_of_samples <- table(meta$group)
+sample_cutoff <- min(no_of_samples)
+
+idx_man_threshold <- apply(Biobase::exprs(gset), 1, function(x){ sum(x > man_threshold) >= sample_cutoff})
+
+table(idx_man_threshold)
+```
+
+
+```{r}
+batches <- as.factor(gset$group)
+
+col.status <- c("blue","red","dark green")[batches]
+plotMDS(gset, col = col.status, pch = 16)
+```
+
+
+## Design matrix
+
+Now we are setting the theshold for the diferentially expressed genes
+```{r}
+PVALUE = 0.1
+LOGFOLDCHANGE = 1
+c1 = "Young"
+c2 = "Old"
+doc_name <- paste("DEG_list_", my_id, "_", c1, "_vs_", c2, ".csv", sep = "")
+EXPECTED_PROPORTION = 0.01
+```
+
+
+And here we desing the experiment with that expected proportion of genes, the gset and the comparisons, in this case there are only two evaluations, young and old, so there is only going to be two
+```{r}
+design <- model.matrix(~group + 0, gset)
+colnames(design) <- levels(gs)
+fit <- lmFit(gset, design)
+
+# Set up contrasts of interest
+cts <- paste(groups, c(tail(groups, -1), head(groups, 1)), sep="-")
+cont.matrix <- makeContrasts(contrasts=cts, levels=design)
+fit2 <- contrasts.fit(fit, cont.matrix)
+fit2 <- eBayes(fit2, EXPECTED_PROPORTION)
+# print contrasts order
+colnames(fit2[["coefficients"]])
+```
+
+Here I am going to get the second comparison of fit2 (Young-old) and get the top genes
+```{r}
+
+#Create the top table for the comparison (coef) we want
+top <- topTable(fit2, coef=2, adjust.method = "fdr", sort.by="B", number = Inf)
+nrow(top)
+```
+
+
+Finally we are filtering by pvalue and LFC
+```{r}
+#Top Table of significant genes only
+up_reg_epi <- subset(top, adj.P.Val < PVALUE, abs(logFC)>LOGFOLDCHANGE)
+nrow(up_reg_epi)
+```
+
+```{r}
+#Create an excel-readable table with the specified columns for sig gene only
+tT <- subset(up_reg_epi, select=c("Gene.Symbol","logFC","adj.P.Val","P.Value","t"))
+write.table(tT, doc_name, row.names=F, sep="\t")
+
+#Sanity check - hist of all P vals
+hist(top$adj.P.Val, col = "grey", border = "white", xlab = "P-adj",
+     ylab = "Number of genes", main = "P-adj value distribution")
+```
+We can see that the pvalue reduced a lot
+
+```{r}
+# Hist of sig DEG P values
+hist(up_reg_epi$adj.P.Val, col = "grey", border = "white", xlab = "P-adj",
+     ylab = "Number of genes", main = "P-adj value distribution")
+```
+
+```{r}
+#Extract the expression values for the DEGs
+e <- exprs(gset)
+sig_exprs <- e[rownames(e) %in% as.character(tT$ID),]
+```
+
+```{r}
+library(DT)
+DT::datatable(up_reg_epi, rownames = FALSE, options=list(scrollX=T))
+```
+
+Since we only have two groups, the venn diagram of the comparisons make no sense
+```{r}
+# summarize test results as "up", "down" or "not expressed"
+dT <- decideTests(fit2, adjust.method="fdr", p.value=PVALUE)
+vennDiagram(dT, circle.col=palette())
+```
+I do not know what this means
+
+```{r}
+# create Q-Q plot for t-statistic
+t.good <- which(!is.na(fit2$F)) # filter out bad probes
+qqt(fit2$t[t.good], fit2$df.total[t.good], main="Moderated t statistic")
+```
+And we can see how many genes passed the pvalue theshold, this is for the first comparison in this case old vs young
+```{r}
+# volcano plot (log P-value vs log fold change)
+colnames(fit2) # list contrast names
+ct <- 1
+# choose contrast of interest
+volcanoplot(fit2, coef=ct, main=colnames(fit2)[ct], pch=20,
+            highlight=length(which(dT[,ct]!=0)), names=rep('+', nrow(fit2)))
+```
+We are using the second cosntrast as we mentioned before on fit2, so this is the one that we care about
+```{r}
+ct <- 2
+# choose contrast of interest
+volcanoplot(fit2, coef=ct, main=colnames(fit2)[ct], pch=20,
+            highlight=length(which(dT[,ct]!=0)), names=rep('+', nrow(fit2)))
+```
+
+## Volcano plot with LFC
+
+```{r VOlcano_plots}
+#reset par
+par(mfrow=c(1,1))
+# Make a basic volcano plot
+with(top, plot(logFC, -log10(adj.P.Val), pch=20, main="Volcano plot", xlim=c(-3,3)))
+
+# Add colored points: blue if padj<0.01, red if log2FC>1 and padj<0.05)
+with(subset(top, adj.P.Val<PVALUE ), points(logFC, -log10(adj.P.Val), pch=20, col="blue"))
+with(subset(top, adj.P.Val<PVALUE & abs(logFC)>LOGFOLDCHANGE), points(logFC, -log10(adj.P.Val), pch=20, col="red"))
+```
+My differentially express genes with this conditions are:
+
+```{r}
+
+de_genes = top[abs(top$logFC) > LOGFOLDCHANGE & top$adj.P.Val < PVALUE, ]
+de_genes[c("Gene.Symbol","logFC","AveExpr", "adj.P.Val")]
+```
+
+
+## MD plot (log fold change vs mean log expression) highlight statistically significant (p-adj < 0.05) probes
+
+```{r}
+ct <- 1
+plotMD(fit2, column=ct, status=dT[,ct], legend=F, pch=20, cex=1)
+abline(h=0)
+```
+
+
+We can see their mean expression (don't undestand this plot a lot either)
+```{r}
+ct <- 2
+plotMD(fit2, column=ct, status=dT[,ct], legend=F, pch=20, cex=1)
+abline(h=0)
+```
+
+```{r}
+ct <- 1
+plotMD(fit2, column=ct, status=dT[,ct], legend=F, pch=20, cex=1)
+abline(h=0)
+```
+
+## Heat Map
+And the heatmap of the genes and groups
+```{r}
+library(pheatmap)
+annotation_for_heatmap <- 
+  data.frame(Subtype = gset$group)
+
+dists <- as.matrix(dist(t(exprs(gset)), method = "manhattan"))
+rownames(dists) <- row.names(annotation_for_heatmap)
+hmcol <- rev(colorRampPalette(RColorBrewer::brewer.pal(9, "YlOrRd"))(255))
+colnames(dists) <- NULL
+diag(dists) <- NA
+
+ann_colors <- list(
+  Subtype = c(Young = "purple", Old = "cyan3"))
+
+pheatmap(dists, col = (hmcol), 
+         annotation_row = annotation_for_heatmap,
+         annotation_colors = ann_colors,
+         legend = TRUE, 
+         show_rownames = FALSE,
+         treeheight_row = 0,
+         legend_breaks = c(min(dists, na.rm = TRUE), 
+                         max(dists, na.rm = TRUE)), 
+         legend_labels = (c("small distance", "large distance")),
+         main = "Clustering heatmap normalised samples")
+```
+
+## Differentially expressed genes plots
+
+We got the DE_gset before and their ID we saved them on selected_rows
+```{r}
+selected_rows <-de_genes$ID
+```
+
+
+```{r}
+de_gset <- gset[selected_rows, ]
+batches <- as.factor(de_gset$group)
+
+col.status <- c("blue","red","dark green")[batches]
+plotMDS(de_gset, col = col.status, pch = 16)
+```
+
+
+And the heatmap of the differentially expressed genes
+```{r}
+library(pheatmap)
+annotation_for_heatmap <- 
+  data.frame(Subtype = gset$group)
+
+de_gset <- exprs(gset)[selected_rows, ]
+dists <- as.matrix(dist(t(de_gset), method = "manhattan"))
+rownames(dists) <- row.names(annotation_for_heatmap)
+hmcol <- rev(colorRampPalette(RColorBrewer::brewer.pal(9, "YlOrRd"))(255))
+colnames(dists) <- NULL
+diag(dists) <- NA
+
+ann_colors <- list(
+  Subtype = c(Young = "purple", Old = "cyan3"))
+
+pheatmap(dists, col = (hmcol), 
+         annotation_row = annotation_for_heatmap,
+         annotation_colors = ann_colors,
+         legend = TRUE, 
+         show_rownames = FALSE,
+         treeheight_row = 0,
+         legend_breaks = c(min(dists, na.rm = TRUE), 
+                         max(dists, na.rm = TRUE)), 
+         legend_labels = (c("small distance", "large distance")),
+         main = "Clustering heatmap normalised samples")
+```
