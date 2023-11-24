@@ -1,0 +1,176 @@
+---
+title: "test"
+output:
+  html_document: default
+  pdf_document: default
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#knitr::opts_chunk$set(echo = TRUE, eval=FALSE)
+
+```
+
+# llll
+
+```{r import, echo=FALSE}
+library(illuminaHumanv4.db)
+library(ggpubr)
+library(GEOquery)
+library(limma)
+library(gplots)
+library(dplyr)
+library(tidyr)
+
+
+
+```
+
+## Importing the Data
+In this case there are A LOT, so I must list them
+```{r}
+sample_accessions <- c(
+  "GSM2793109","GSM2793115","GSM2793116","GSM2793117","GSM2793125","GSM2793131","GSM2793134","GSM2793161","GSM2793170",
+"GSM2793177","GSM2793184","GSM2793222","GSM2793077","GSM2793224","GSM2793225","GSM2793091","GSM2793250","GSM2793251",
+"GSM2793096","GSM2793078","GSM2793103","GSM2793105","GSM2793279","GSM2793280","GSM2793287","GSM2793289","GSM2793299",
+"GSM2793301","GSM2793261","GSM2793304","GSM2793311","GSM2793331","GSM2793332","GSM2793264","GSM2793336","GSM2793351",
+"GSM2793370","GSM2793383","GSM2793393","GSM2793412","GSM2793414","GSM2793417","GSM2793424","GSM2793276","GSM2793474",
+"GSM2793481","GSM2793435","GSM2793510","GSM2793531","GSM2793439","GSM2793571","GSM2793585","GSM2793444","GSM2793597",
+"GSM2793609","GSM2793612","GSM2793613","GSM2793614","GSM2793616","GSM2793428","GSM2793622","GSM2793450","GSM2793107",
+"GSM2793079","GSM2793114","GSM2793122","GSM2793146","GSM2793157","GSM2793159","GSM2793163","GSM2793175","GSM2793190",
+"GSM2793210","GSM2793219","GSM2793230","GSM2793232","GSM2793234","GSM2793238","GSM2793239","GSM2793243","GSM2793249",
+"GSM2793286","GSM2793296","GSM2793297","GSM2793305","GSM2793306","GSM2793316","GSM2793324","GSM2793340","GSM2793356",
+"GSM2793267","GSM2793405","GSM2793408","GSM2793409","GSM2793421","GSM2793422","GSM2793258","GSM2793457","GSM2793460",
+"GSM2793461","GSM2793463","GSM2793466","GSM2793431","GSM2793489","GSM2793493","GSM2793505","GSM2793436","GSM2793515",
+"GSM2793518","GSM2793525","GSM2793532","GSM2793540","GSM2793557","GSM2793566","GSM2793569","GSM2793443","GSM2793573",
+"GSM2793579","GSM2793590","GSM2793592","GSM2793595","GSM2793606","GSM2793445","GSM2793451","GSM2793429","GSM2793456")
+
+# Initialize an empty list to store the data
+geo_data_list <- list()
+
+# Loop through the sample accessions and retrieve the data
+for (accession in sample_accessions) {
+  tryCatch({
+    geo_data <- getGEO(accession, GSEMatrix = TRUE)
+    geo_data_list[[accession]] <- geo_data
+  }, error = function(e) {
+    cat(paste("Error for accession", accession, ":", conditionMessage(e), "\n"))
+  })
+}
+
+```
+
+
+
+```{r}
+
+attribute_headers <- list()
+
+# Loop through the geo_data_list
+for (accession in sample_accessions) {
+  geo_data <- geo_data_list[[accession]]
+  
+  # Extract the attribute header from the GEO data object
+  attribute_header <- attributes(geo_data)$header
+  
+  # Add the attribute header to the list
+  attribute_headers[[accession]] <- attribute_header
+}
+
+# Combine attribute headers from all samples into a single dataframe
+combined_attribute_headers <- do.call(rbind, attribute_headers)
+
+```
+
+
+Getting the samples from platform GPL570 from the experiment (in the bioproject)
+```{r get_samples, echo=FALSE}
+if (length(gse) > 1) idx <- grep("GPL24047", attr(gse, "names")) else idx <- 1
+gset1 <- gse[[idx]]
+
+
+gset = gset1
+
+```
+
+
+Seeing the metadata
+```{r metadata}
+geo_data_list
+fData(geo_data_list)
+fvarLabels(geo_data_list)
+```
+Seeing the headers of the metadata
+```{r headers}
+sample_data = pData(gset)
+colnames(sample_data)
+
+```
+
+Here we need to manually select the column with the class that we are interesting and see the values
+here the data seems to be in source_name_ch1
+
+```{r see_unique_categories}
+unique(sample_data$characteristics_ch1.2)
+```
+
+
+```{r }
+ex <- exprs(gset) # expression data, what form is this?
+qx <- as.numeric(quantile(ex, c(0., 0.25, 0.5, 0.75, 0.99, 1.0), na.rm=T))
+LogC <- (qx[5] > 100) ||
+  (qx[6]-qx[1] > 50 && qx[2] > 0)
+if (LogC) { ex[which(ex <= 0)] <- NaN
+exprs(gset) <- log2(ex) } # i think this code is trying to determine whether the data is in log2 format yet
+```
+
+## Design matrix
+
+Now we are setting the theshold for the diferentially expressed genes
+```{r}
+PVALUE = 0.1
+LOGFOLDCHANGE = 1
+y = "Young"
+o = "Old"
+m = "MiddleAge"
+
+EXPECTED_PROPORTION = 0.01
+
+metadata_doc_name <- paste("samples_", my_id, ".csv", sep = "")
+expression_doc_name <- paste("expression_", my_id, ".csv", sep = "")
+
+assign_names <- function(c1, c2) {
+  doc_name <- paste("DEG_list_", my_id, "_", c1, "_vs_", c2, ".csv", sep = "")
+  dds_doc_name <- paste("dds_", my_id, "_", c1[1], c2[1], ".csv", sep = "")
+  
+  return (c(doc_name, dds_doc_name))
+}
+
+```
+
+And let's save the expression and metadata files that are independent of the comparisons.
+```{r saving_tables_1}
+gene_table = featureData(gset)
+
+desired_columns <- c("GB_ACC", "SEQUENCE", "ENTREZ_GENE_ID", "RefSeq.Transcript.ID","REFSEQ", "Gene.Symbol", "Ensembl_ID", "SPOT_ID")
+symbol_column  <- gene_table$GB_ACC
+symbol_df <- data.frame(GB_ACC = symbol_column)
+
+# Loop through each desired column
+for (col_name in desired_columns) {
+  # Check if the column exists in gene_table
+  if (col_name %in% colnames(gene_table)) {
+    symbol_column  <- gene_table[[col_name]]
+    symbol_df[[col_name]] <- symbol_column
+  } 
+}
+
+
+
+expression_df = merge(ex, ID_geneSymbol_df, by="row.names", all.x=TRUE)
+write.table(expression_df, expression_doc_name, row.names=F, sep=",")
+
+write.table(sample_data, metadata_doc_name, row.names=F, sep=",")
+
+```

@@ -1,0 +1,235 @@
+---
+title: "test"
+output:
+  html_document: default
+  pdf_document: default
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#knitr::opts_chunk$set(echo = TRUE, eval=FALSE)
+
+```
+
+# llll
+
+```{r import, echo=FALSE}
+library(illuminaHumanv4.db)
+library(ggpubr)
+library(GEOquery)
+library(limma)
+library(gplots)
+library(dplyr)
+library(tidyr)
+
+
+
+```
+
+## Importing the Data
+
+```{r getting_experiment,  echo=FALSE}
+my_id <- "GSE17992"
+gse <- getGEO(my_id, GSEMatrix =TRUE)
+```
+
+Getting the samples from platform GPL570 from the experiment (in the bioproject)
+```{r get_samples, echo=FALSE}
+if (length(gse) > 1) idx <- grep("GPL4133", attr(gse, "names")) else idx <- 1
+gset1 <- gse[[idx]]
+
+gset = gset1
+
+```
+
+
+Seeing the metadata
+```{r metadata}
+pData(gset)
+fData(gset)
+fvarLabels(gset)
+```
+```{r}
+df = fData(gset)
+filtered_df <- subset(df, GB_ACC == "NM_021130")
+
+```
+
+Seeing the headers of the metadata
+```{r headers}
+sample_data = pData(gset)
+colnames(sample_data)
+
+```
+
+
+```{r clean_up}
+sample_data$age = sample_data$`agent:ch1`
+
+
+```
+
+
+
+Getting the microarray ID's data (like the gene name) but this is RNA seq. I have the counts with gene symbols
+
+```{r sample_metadata}
+fvarLabels(gset) <- make.names(fvarLabels(gset))
+features <- fData(gset)
+features
+```
+
+Here, I will need a function to take a column and gives me a vector, 0 is it is young, 1 if it is middle age and 2 if it is old
+```{r age_category_function}
+map_age <- function(age_category) {
+  
+  age_vector <- ifelse(age_category == "control", 0, 1)
+  #age_vector <- ifelse(age_category < 35, 0, ifelse(age_category >= 65, 2, 1))
+
+  return (paste(age_vector, collapse = ""))
+}
+
+```
+
+If we use it, we will get the mapped data
+
+```{r }
+# coding subtypes, 0 = YOUNG, 1 = MIDDLE AGE, 2 = OLD
+gsms <- map_age(sample_data$age)
+gsms #<- "111111111111000000000000"
+sml <- strsplit(gsms, split="")[[1]]
+```
+And this is to put the labels when we don't have them, but in this case we do
+```{r mapping}
+
+gs <- factor(sml)
+groups <- make.names(c("control", "trearment"))
+levels(gs) <- groups
+gset$group <- gs
+```
+But since we did when we separated the title, we go with
+
+
+## Check normalisation and scales used
+
+Log2 scale transformation required
+
+Check for normalisation by looking at boxplot of expression levels for each sample
+
+
+```{r }
+ex <- exprs(gset) # expression data, what form is this?
+qx <- as.numeric(quantile(ex, c(0., 0.25, 0.5, 0.75, 0.99, 1.0), na.rm=T))
+LogC <- (qx[5] > 100) ||
+  (qx[6]-qx[1] > 50 && qx[2] > 0)
+if (LogC) { ex[which(ex <= 0)] <- NaN
+exprs(gset) <- log2(ex) } # i think this code is trying to determine whether the data is in log2 format yet
+```
+
+And here we see how are the samples before any selection
+```{r boxplot1}
+
+ord <- order(gs)  # order samples by group
+
+palette <- palette(c("#1B9E77", "#7570B3", "#E7298A", "#E6AB02", "#D95F02",
+          "#66A61E", "#A6761D", "#B32424", "#B324B3", "#666666"))
+par(mar=c(7,4,2,1))
+title <- paste (my_id, "/", annotation(gset), sep ="")
+boxplot(log2(ex[,ord]), boxwex=0.6, notch=T, main=title, outline=FALSE, las=2, col=gs[ord])
+legend("topleft", groups, fill=palette(), bty="n")
+```
+
+
+```{r boxplot2}
+boxplot(log2(ex),range=0,ylab="log2 intensity")
+```
+
+
+## Probe filtering
+
+```{r }
+# expression value distribution
+par(mar=c(4,4,2,1))
+title <- paste ("Normalized Expression Density", sep ="")
+plotDensities(ex[,ord], group=gs, main=title, legend ="topright")
+```
+
+```{r}
+# Probe filtering
+medians <- rowMedians(ex)
+man_threshold <- 4 
+
+hist(medians, 150, col = "cornsilk1", freq = FALSE, 
+main = "Histogram of the median intensities", 
+border = "antiquewhite4",
+xlab = "Median intensities")
+```
+
+```{r}
+meta <- pData(gset)
+meta$group
+```
+
+```{r}
+no_of_samples <- table(meta$group)
+sample_cutoff <- min(no_of_samples)
+
+idx_man_threshold <- apply(Biobase::exprs(gset), 1, function(x){ sum(x > man_threshold) >= sample_cutoff})
+
+table(idx_man_threshold)
+```
+
+
+```{r}
+batches <- as.factor(gset$group)
+
+col.status <- c("blue","red","dark green")[batches]
+plotMDS(gset, col = col.status, pch = 16)
+```
+
+
+
+
+## Design matrix
+
+Now we are setting the theshold for the diferentially expressed genes
+```{r}
+PVALUE = 0.1
+LOGFOLDCHANGE = 1
+y = "Young"
+o = "Old"
+m = "MiddleAge"
+
+EXPECTED_PROPORTION = 0.01
+
+metadata_doc_name <- paste("samples_", my_id, ".csv", sep = "")
+expression_doc_name <- paste("expression_", my_id, ".csv", sep = "")
+
+assign_names <- function(c1, c2) {
+  doc_name <- paste("DEG_list_", my_id, "_", c1, "_vs_", c2, ".csv", sep = "")
+  dds_doc_name <- paste("dds_", my_id, "_", c1[1], c2[1], ".csv", sep = "")
+  
+  return (c(doc_name, dds_doc_name))
+}
+
+```
+
+And let's save the expression and metadata files that are independent of the comparisons.
+```{r saving_tables_1}
+gene_table = featureData(gset)
+symbol_column  <- gene_table$GB_ACC#ENSEMBL_ID
+sequence_column <- gene_table$SEQUENCE
+symbol_df <- data.frame(symbol = symbol_column, sequence= sequence_column)
+
+# Combine the extracted "symbol" column with the row index from the AnnotatedDataFrame
+ID_geneSymbol_df <- cbind(symbol_df, row.names = rownames(gene_table))
+
+
+
+expression_df = merge(ex, ID_geneSymbol_df, by="row.names", all.x=TRUE)
+write.table(expression_df, expression_doc_name, row.names=F, sep=",")
+
+write.table(sample_data, metadata_doc_name, row.names=F, sep=",")
+
+```

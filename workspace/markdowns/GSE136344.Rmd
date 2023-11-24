@@ -13,7 +13,6 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 # llll
-From this one I will only take the expression of the selected genes.
 
 ```{r import, echo=FALSE}
 library(illuminaHumanv4.db)
@@ -31,15 +30,16 @@ library(tidyr)
 ## Importing the Data
 
 ```{r getting_experiment,  echo=FALSE}
-my_id <- "GSE6348"
+my_id <- "GSE136344"
 gse <- getGEO(my_id, GSEMatrix =TRUE)
 ```
 
 Getting the samples from platform GPL570 from the experiment (in the bioproject)
 ```{r get_samples, echo=FALSE}
-if (length(gse) > 1) idx <- grep("GPL2700", attr(gse, "names")) else idx <- 1
-gset <- gse[[idx]]
+if (length(gse) > 1) idx <- grep("GPL5175", attr(gse, "names")) else idx <- 1
+gset1 <- gse[[idx]]
 
+gset = gset1
 
 ```
 
@@ -58,27 +58,37 @@ colnames(sample_data)
 ```
 
 Here we need to manually select the column with the class that we are interesting and see the values
+here the data seems to be in source_name_ch1
 
 ```{r see_unique_categories}
 unique(sample_data$characteristics_ch1.1)
 ```
 
-In this case, characteristics_ch1.1 has the class in a compose string.  I will separate them in age, status (trained/sedentary) and one extra column age + status
+```{r see gender_categories}
+unique(sample_data$`gender:ch1`)
+```
+
+
+
+In this case, source_name_ch1 has the class in a compose string.  I will separate them in age, sex (Female/Male) and one extra column age + age
 
 ```{r clean_up}
-sample_data <- separate(sample_data, characteristics_ch1.1, into = c("age", "nothing"), sep = " at onset of intervention")
-sample_data <- separate(sample_data, age, into = c("nothing", "age"), sep = "Age: ")
-```
+sample_data <- separate(sample_data, characteristics_ch1.1, into = c("other", "age"), sep = ": ")
 
-Now I have age, status and age_class that has both
-```{r check_cleanup}
-unique(sample_data$age)
-unique(sample_data$status)
-unique(sample_data$age_class)
 
 ```
+
+Here they are using old, young and old with Metabolic syndrome, but since it is a common syndrome, I will leave it, in case I wanted to remove it the line will be:
+```{r}
+#sample_data <- sample_data[sample_data$	characteristics_ch1.2 != 'disease state: metabolic syndrome', ]
+
+```
+
+
+
 
 Getting the microarray ID's data (like the gene name)
+
 ```{r sample_metadata}
 fvarLabels(gset) <- make.names(fvarLabels(gset))
 features <- fData(gset)
@@ -87,7 +97,10 @@ features
 Here, I will need a function to take a column and gives me a vector, 0 is it is young, 1 if it is middle age and 2 if it is old
 ```{r age_category_function}
 map_age <- function(age_category) {
-  age_vector <- ifelse(age_category == "Young", 0, ifelse(age_category == "Old", 2, 1))
+  
+  #age_vector <- ifelse(age_category == "Young", 0, ifelse(age_category == "Old", 2, 1))
+  age_vector <- ifelse(age_category < 35, 0, ifelse(age_category >= 65, 2, 1))
+
   return (paste(age_vector, collapse = ""))
 }
 
@@ -105,15 +118,12 @@ And this is to put the labels when we don't have them, but in this case we do
 ```{r mapping}
 
 gs <- factor(sml)
-groups <- make.names(c("OLD","YOUNG"))
+groups <- make.names(c("Young", "Old"))
 levels(gs) <- groups
 gset$group <- gs
 ```
 But since we did when we separated the title, we go with
 
-```{r}
-gset$group <- sample_data$age
-```
 
 ## Check normalisation and scales used
 
@@ -193,6 +203,8 @@ plotMDS(gset, col = col.status, pch = 16)
 ```
 
 
+
+
 ## Design matrix
 
 Now we are setting the theshold for the diferentially expressed genes
@@ -203,28 +215,24 @@ y = "Young"
 o = "Old"
 m = "MiddleAge"
 
-extra ="_2"
 EXPECTED_PROPORTION = 0.01
 
-metadata_doc_name <- paste("samples_", my_id, extra, ".csv", sep = "")
-expression_doc_name <- paste("expression_", my_id, extra, ".csv", sep = "")
+metadata_doc_name <- paste("samples_", my_id, ".csv", sep = "")
+expression_doc_name <- paste("expression_", my_id, ".csv", sep = "")
 
 assign_names <- function(c1, c2) {
-  doc_name <- paste("DEG_list_", my_id, "_", c1, "_vs_", c2, extra, ".csv", sep = "")
-  dds_doc_name <- paste("dds_", my_id, "_", c1[1], c2[1], extra, ".csv", sep = "")
+  doc_name <- paste("DEG_list_", my_id, "_", c1, "_vs_", c2, ".csv", sep = "")
+  dds_doc_name <- paste("dds_", my_id, "_", c1[1], c2[1], ".csv", sep = "")
   
   return (c(doc_name, dds_doc_name))
 }
 
 ```
 
-
-And here we desing the experiment with that expected proportion of genes, the gset and the comparisons, in this case there are only two evaluations, young and old, so there is only going to be two
 And let's save the expression and metadata files that are independent of the comparisons.
 ```{r saving_tables_1}
 gene_table = featureData(gset)
-symbol_column  <- gene_table$GB_ACC
-
+symbol_column  <- gene_table$GB_LIST
 symbol_df <- data.frame(symbol = symbol_column)
 desired_columns <- c("GB_ACC", "SEQUENCE", "ENTREZ_GENE_ID", "RefSeq.Transcript.ID","REFSEQ", "Gene.Symbol", "Ensembl_ID", "SPOT_ID")
 
@@ -248,63 +256,6 @@ write.table(sample_data, metadata_doc_name, row.names=F, sep=",")
 
 ```
 
-```{r NOTHINH}
-#install.packages("biomaRt")
-accession_numbers <- c("NM_001301717.1", "NM_002001.2", "NM_0030023.2")
-gene_info <- getBM(
-  attributes = c("ensembl_transcript_id", "external_gene_name"),
-  filters = "refseq_mrna",
-  values = accession_numbers,
-  mart = ensembl
-)
-gene_info$external_gene_name
-```
-```{r Also this, fuck R!}
-# Sample dataframes (replace these with your actual data)
-map_df <- gene_symbols
-
-assertions_df <- data.frame( refseq_mrna_version = gene_table$GB_ACC)
-assertions_df$refseq_mrna = gsub("\\..*", "", assertions_df$refseq_mrna_version)
-# Merge the dataframes using a left join to preserve all assertions
-merged_df <- merge(assertions_df, map_df, by = "refseq_mrna", all.x = TRUE)
-
-# Replace NA values in the "Gene_Symbol" column with the original assertion
-merged_df$external_gene_name[is.na(merged_df$external_gene_name)] <- merged_df$refseq_mrna[is.na(merged_df$external_gene_name)]
-
-# Optionally, remove the "Assertion" column if you don't need it
-merged_df <- merged_df[, c("refseq_mrna_version", "external_gene_name")]
-seconf_df <- merge(ID_geneSymbol_df, merged_df, by.x = "assertion", by.y = "refseq_mrna_version", all.x = TRUE)
-
-
-
-library(dplyr)
-
-result_df <- ID_geneSymbol_df %>%
-  left_join(merged_df, by = c("assertion" = "refseq_mrna_version"))
-
-
-
-library(biomaRt)
-
-assertions <- gsub("\\..*", "", symbol_column)
-ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
-
-# Get the gene symbols for the accession numbers in your dataframe
-gene_symbols <- getBM(
-  attributes = c("refseq_mrna","ensembl_transcript_id", "external_gene_name"),
-  filters = "refseq_mrna",
-  values = assertions,
-  mart = ensembl
-)
-
-
-
-
-
-# Merge the gene symbols back into your dataframe
-```
-
-# AFTER HERE< NOTHIN IS RUN SINCE THERE ARE ONLY MIDDLE AGE WOMEN
 
 And here we design the experiment with that expected proportion of genes, the gset and the comparisons, in this case we have 3 groups
 ```{r}
@@ -323,11 +274,34 @@ fit2 <- eBayes(fit2)
 colnames(fit2[["coefficients"]])
 ```
 
-Here I am going to get the second comparison of fit2 (Young-old) and get the top genes
+Here I am going to get one of the comparison of fit2 (see adove for the index), and specify the c's for the names 
 ```{r}
+## Change this if needed
+c1 = y
+c2 = o
+ncoef = 1
+## and let this alone
+docs_names = assign_names(c1,c2)
+doc_name = docs_names[1]
+dds_doc_name = docs_names[2]
 
+
+```
+
+and get the top genes
+```{r}
 #Create the top table for the comparison (coef) we want
-top <- topTable(fit2, coef=2, adjust.method = "fdr", sort.by="B", number = Inf)
+top <- topTable(fit2, coef=ncoef, adjust.method = "fdr", sort.by="B", number = Inf)
+
+#top_top <- top %>%
+#  mutate(fdr = p.adjust(P.Value, "fdr"))
+#baby_top <- topTable(fit2, coef=ncoef, adjust.method = "none", sort.by="B", number = Inf)
+#top_top <- baby_top %>%
+#  mutate(fdr = p.adjust(P.Value, "BH"))
+#top_top <- top_top %>%
+#  mutate(by = p.adjust(P.Value, "BY"))
+#adjusted_all__p_values <- p.adjust(baby_top$p.value, method = "BH")
+
 nrow(top)
 ```
 
@@ -338,11 +312,24 @@ Finally we are filtering by pvalue and LFC
 up_reg_epi <- subset(top, adj.P.Val < PVALUE, abs(logFC)>LOGFOLDCHANGE)
 nrow(up_reg_epi)
 ```
+```{r saving_tables}
+
+dds_df = subset(top, select=c("GB_LIST","logFC","adj.P.Val","P.Value", "ID"))
+write.table(dds_df, dds_doc_name, row.names=F, sep=",")
+
+
+
+```
+
+
 
 ```{r}
 #Create an excel-readable table with the specified columns for sig gene only
-tT <- subset(up_reg_epi, select=c("Gene.Symbol","logFC","adj.P.Val","P.Value","t"))
+tT <- subset(up_reg_epi, select=c("GB_LIST","logFC","adj.P.Val","P.Value","ID"))
 write.table(tT, doc_name, row.names=F, sep="\t")
+
+
+
 
 #Sanity check - hist of all P vals
 hist(top$adj.P.Val, col = "grey", border = "white", xlab = "P-adj",

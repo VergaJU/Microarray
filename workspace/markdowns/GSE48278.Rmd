@@ -13,7 +13,6 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 # llll
-From this one I will only take the expression of the selected genes.
 
 ```{r import, echo=FALSE}
 library(illuminaHumanv4.db)
@@ -31,15 +30,17 @@ library(tidyr)
 ## Importing the Data
 
 ```{r getting_experiment,  echo=FALSE}
-my_id <- "GSE8157"
+my_id <- "GSE48278"
 gse <- getGEO(my_id, GSEMatrix =TRUE)
 ```
 
 Getting the samples from platform GPL570 from the experiment (in the bioproject)
 ```{r get_samples, echo=FALSE}
 if (length(gse) > 1) idx <- grep("GPL570", attr(gse, "names")) else idx <- 1
-gset <- gse[[idx]]
+gset1 <- gse[[idx]]
 
+
+gset = gset1
 
 ```
 
@@ -57,56 +58,18 @@ colnames(sample_data)
 
 ```
 
-Here we are not going to get the age but the poliquistic status
+Here we need to manually select the column with the class that we are interesting and see the values
+here the data seems to be in source_name_ch1
+
 ```{r see_unique_categories}
-unique(sample_data$title)
+unique(sample_data$characteristics_ch1.2)
 ```
 
-In this case, title has the class in a compose string.  I will separate them in age, status (trained/sedentary) and one extra column age + status
-
+I want to have the diabetic men marked 
 ```{r clean_up}
-sample_data <- separate(sample_data, title, into = c("nothing", "status"), sep = "Muscle PCOS ")
-sample_data <- separate(sample_data, status, into = c("nothing", "status"), sep = "after ")
-sample_data <- separate(sample_data, status, into = c("status", "id"), sep = " ")
-sample_data$status[sample_data$status=="pioglitazone"] <- "after_pioglitazone"
-sample_data <- separate(sample_data, nothing, into = c("status_2", "id_2"), sep = " ")
-
-sample_data$id <- ifelse(is.na(sample_data$id), sample_data$id_2, sample_data$id)
-sample_data$status <- ifelse(is.na(sample_data$status), sample_data$status_2, sample_data$status)
+sample_data$age <- sample_data$`age (yr):ch1`
+sample_data 
 ```
-
-Now I have age, status and age_class that has both
-```{r check_cleanup}
-unique(sample_data$age)
-unique(sample_data$status)
-unique(sample_data$age_class)
-
-```
-Since this one has condition treatment, I will remove all the non control ones
-```{r}
-sample_data <- sample_data[sample_data$status == 'control', ]
-
-```
-
-
-
-
-Since this one has before and after enrichment, I will remove all the non control ones
-```{r}
-sample_data <- sample_data[sample_data$other == 'before antibody enrichment scan 1 (U133B)', ]
-
-```
-
-
-
-Getting the microarray ID's data (like the gene name)
-```{r sample_metadata}
-fvarLabels(gset) <- make.names(fvarLabels(gset))
-features <- fData(gset)
-features
-```
-
-
 
 
 ```{r }
@@ -145,8 +108,8 @@ assign_names <- function(c1, c2) {
 And let's save the expression and metadata files that are independent of the comparisons.
 ```{r saving_tables_1}
 gene_table = featureData(gset)
-symbol_column  <- gene_table$Gene.Symbol
-symbol_df <- data.frame(symbol = symbol_column)
+symbol_column  <- gene_table$GB_ACC
+symbol_df <- data.frame(GB_ACC = symbol_column)
 desired_columns <- c("GB_ACC", "SEQUENCE", "ENTREZ_GENE_ID", "RefSeq.Transcript.ID","REFSEQ", "Gene.Symbol", "Ensembl_ID", "SPOT_ID")
 
 # Loop through each desired column
@@ -168,4 +131,3 @@ write.table(expression_df, expression_doc_name, row.names=F, sep=",")
 write.table(sample_data, metadata_doc_name, row.names=F, sep=",")
 
 ```
-

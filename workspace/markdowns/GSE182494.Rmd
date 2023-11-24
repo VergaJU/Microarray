@@ -13,7 +13,6 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 # llll
-From this one I will only take the expression of the selected genes.
 
 ```{r import, echo=FALSE}
 library(illuminaHumanv4.db)
@@ -31,15 +30,17 @@ library(tidyr)
 ## Importing the Data
 
 ```{r getting_experiment,  echo=FALSE}
-my_id <- "GSE8157"
+my_id <- "GSE182494"
 gse <- getGEO(my_id, GSEMatrix =TRUE)
 ```
 
 Getting the samples from platform GPL570 from the experiment (in the bioproject)
 ```{r get_samples, echo=FALSE}
-if (length(gse) > 1) idx <- grep("GPL570", attr(gse, "names")) else idx <- 1
-gset <- gse[[idx]]
+if (length(gse) > 1) idx <- grep("GPL23159	", attr(gse, "names")) else idx <- 1
+gset1 <- gse[[idx]]
 
+
+gset = gset1
 
 ```
 
@@ -57,56 +58,55 @@ colnames(sample_data)
 
 ```
 
-Here we are not going to get the age but the poliquistic status
+Here we need to manually select the column with the class that we are interesting and see the values
+here the data seems to be in source_name_ch1
+
 ```{r see_unique_categories}
 unique(sample_data$title)
 ```
 
-In this case, title has the class in a compose string.  I will separate them in age, status (trained/sedentary) and one extra column age + status
 
-```{r clean_up}
-sample_data <- separate(sample_data, title, into = c("nothing", "status"), sep = "Muscle PCOS ")
-sample_data <- separate(sample_data, status, into = c("nothing", "status"), sep = "after ")
-sample_data <- separate(sample_data, status, into = c("status", "id"), sep = " ")
-sample_data$status[sample_data$status=="pioglitazone"] <- "after_pioglitazone"
-sample_data <- separate(sample_data, nothing, into = c("status_2", "id_2"), sep = " ")
-
-sample_data$id <- ifelse(is.na(sample_data$id), sample_data$id_2, sample_data$id)
-sample_data$status <- ifelse(is.na(sample_data$status), sample_data$status_2, sample_data$status)
-```
-
-Now I have age, status and age_class that has both
-```{r check_cleanup}
-unique(sample_data$age)
-unique(sample_data$status)
-unique(sample_data$age_class)
-
-```
-Since this one has condition treatment, I will remove all the non control ones
+All samples are young, its checking diabetes and control
 ```{r}
-sample_data <- sample_data[sample_data$status == 'control', ]
-
-```
-
-
-
-
-Since this one has before and after enrichment, I will remove all the non control ones
-```{r}
-sample_data <- sample_data[sample_data$other == 'before antibody enrichment scan 1 (U133B)', ]
-
+sample_data$age = sample_data$`exercise status:ch1`
 ```
 
 
 
 Getting the microarray ID's data (like the gene name)
+
 ```{r sample_metadata}
 fvarLabels(gset) <- make.names(fvarLabels(gset))
 features <- fData(gset)
 features
 ```
+Here, I will need a function to take a column and gives me a vector, 0 is it is young, 1 if it is middle age and 2 if it is old
+```{r age_category_function}
+map_age <- function(age_category) {
+  
+  age_vector <- ifelse(age_category == "pre_exercise",  0,1)
+  #age_vector <- ifelse(age_category < 35, 0, ifelse(age_category >= 65, 2, 1))
+
+  return (paste(age_vector, collapse = ""))
+}
+
+```
+
+If we use it, we will get the mapped data
+
+```{r }
+# coding subtypes, 0 = YOUNG, 1 = MIDDLE AGE, 2 = OLD
+gsms <- map_age(sample_data$age)
+gsms #<- "111111111111000000000000"
+sml <- strsplit(gsms, split="")[[1]]
+```
 
 
+## Check normalisation and scales used
+
+Log2 scale transformation required
+
+Check for normalisation by looking at boxplot of expression levels for each sample
 
 
 ```{r }
@@ -117,6 +117,70 @@ LogC <- (qx[5] > 100) ||
 if (LogC) { ex[which(ex <= 0)] <- NaN
 exprs(gset) <- log2(ex) } # i think this code is trying to determine whether the data is in log2 format yet
 ```
+
+And here we see how are the samples before any selection
+```{r boxplot1}
+
+ord <- order(gs)  # order samples by group
+
+palette <- palette(c("#1B9E77", "#7570B3", "#E7298A", "#E6AB02", "#D95F02",
+          "#66A61E", "#A6761D", "#B32424", "#B324B3", "#666666"))
+par(mar=c(7,4,2,1))
+title <- paste (my_id, "/", annotation(gset), sep ="")
+boxplot(log2(ex[,ord]), boxwex=0.6, notch=T, main=title, outline=FALSE, las=2, col=gs[ord])
+legend("topleft", groups, fill=palette(), bty="n")
+```
+
+
+```{r boxplot2}
+boxplot(log2(ex),range=0,ylab="log2 intensity")
+```
+
+
+## Probe filtering
+
+```{r }
+# expression value distribution
+par(mar=c(4,4,2,1))
+title <- paste ("Normalized Expression Density", sep ="")
+plotDensities(ex[,ord], group=gs, main=title, legend ="topright")
+```
+
+```{r}
+# Probe filtering
+medians <- rowMedians(ex)
+man_threshold <- 4 
+
+hist(medians, 150, col = "cornsilk1", freq = FALSE, 
+main = "Histogram of the median intensities", 
+border = "antiquewhite4",
+xlab = "Median intensities")
+```
+
+```{r}
+meta <- pData(gset)
+meta$group
+```
+
+```{r}
+no_of_samples <- table(meta$group)
+sample_cutoff <- min(no_of_samples)
+
+idx_man_threshold <- apply(Biobase::exprs(gset), 1, function(x){ sum(x > man_threshold) >= sample_cutoff})
+
+table(idx_man_threshold)
+```
+
+
+```{r}
+batches <- as.factor(gset$group)
+
+col.status <- c("blue","red","dark green")[batches]
+plotMDS(gset, col = col.status, pch = 16)
+```
+
+
+
 
 ## Design matrix
 
@@ -169,3 +233,6 @@ write.table(sample_data, metadata_doc_name, row.names=F, sep=",")
 
 ```
 
+
+
+A cannot use this one

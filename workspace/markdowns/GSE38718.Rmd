@@ -31,7 +31,7 @@ library(tidyr)
 ## Importing the Data
 
 ```{r getting_experiment,  echo=FALSE}
-my_id <- "GSE8157"
+my_id <- "GSE38718"
 gse <- getGEO(my_id, GSEMatrix =TRUE)
 ```
 
@@ -62,42 +62,25 @@ Here we are not going to get the age but the poliquistic status
 unique(sample_data$title)
 ```
 
-In this case, title has the class in a compose string.  I will separate them in age, status (trained/sedentary) and one extra column age + status
+In this case, characteristics_ch1.1 has the class in a compose string.  I will separate them in age, status (trained/sedentary) and one extra column age + status
 
 ```{r clean_up}
-sample_data <- separate(sample_data, title, into = c("nothing", "status"), sep = "Muscle PCOS ")
-sample_data <- separate(sample_data, status, into = c("nothing", "status"), sep = "after ")
-sample_data <- separate(sample_data, status, into = c("status", "id"), sep = " ")
-sample_data$status[sample_data$status=="pioglitazone"] <- "after_pioglitazone"
-sample_data <- separate(sample_data, nothing, into = c("status_2", "id_2"), sep = " ")
+sample_data <- separate(sample_data, title, into = c("age", "sex"), sep = " ")
+sample_data <- separate(sample_data, age, into = c("muscle", "age"), sep = "_")
+sample_data <- separate(sample_data, sex, into = c("sex", "rep"), sep = "_")
 
-sample_data$id <- ifelse(is.na(sample_data$id), sample_data$id_2, sample_data$id)
-sample_data$status <- ifelse(is.na(sample_data$status), sample_data$status_2, sample_data$status)
+
+sample_data <- mutate(sample_data, age_sex = paste(age, sex, sep = "_"))
+
 ```
 
 Now I have age, status and age_class that has both
 ```{r check_cleanup}
 unique(sample_data$age)
-unique(sample_data$status)
-unique(sample_data$age_class)
+unique(sample_data$sex)
+unique(sample_data$age_sex)
 
 ```
-Since this one has condition treatment, I will remove all the non control ones
-```{r}
-sample_data <- sample_data[sample_data$status == 'control', ]
-
-```
-
-
-
-
-Since this one has before and after enrichment, I will remove all the non control ones
-```{r}
-sample_data <- sample_data[sample_data$other == 'before antibody enrichment scan 1 (U133B)', ]
-
-```
-
-
 
 Getting the microarray ID's data (like the gene name)
 ```{r sample_metadata}
@@ -105,8 +88,42 @@ fvarLabels(gset) <- make.names(fvarLabels(gset))
 features <- fData(gset)
 features
 ```
+Here, I will need a function to take a column and gives me a vector, 0 is it is young, 1 if it is middle age and 2 if it is old
+```{r age_category_function}
+map_age <- function(age_category) {
+  age_vector <- ifelse(age_category == "Young", 0, ifelse(age_category == "Old", 2, 1))
+  return (paste(age_vector, collapse = ""))
+}
 
+```
 
+If we use it, we will get the mapped data
+
+```{r }
+# coding subtypes, 0 = YOUNG, 1 = MIDDLE AGE, 2 = OLD
+gsms <- map_age(sample_data$age)
+gsms #<- "111111111111000000000000"
+sml <- strsplit(gsms, split="")[[1]]
+```
+And this is to put the labels when we don't have them, but in this case we do
+```{r mapping}
+
+gs <- factor(sml)
+groups <- make.names(c("Young","Old"))
+levels(gs) <- groups
+gset$group <- gs
+```
+But since we did when we separated the title, we go with
+
+```{r}
+gset$group <- sample_data$age
+```
+
+## Check normalisation and scales used
+
+Log2 scale transformation required
+
+Check for normalisation by looking at boxplot of expression levels for each sample
 
 
 ```{r }
@@ -124,10 +141,8 @@ Now we are setting the theshold for the diferentially expressed genes
 ```{r}
 PVALUE = 0.1
 LOGFOLDCHANGE = 1
-y = "Young"
-o = "Old"
-m = "MiddleAge"
-
+c1 = "Young"
+c2 = "Old"
 EXPECTED_PROPORTION = 0.01
 
 metadata_doc_name <- paste("samples_", my_id, ".csv", sep = "")
@@ -141,6 +156,7 @@ assign_names <- function(c1, c2) {
 }
 
 ```
+
 
 And let's save the expression and metadata files that are independent of the comparisons.
 ```{r saving_tables_1}
