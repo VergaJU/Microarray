@@ -1,0 +1,127 @@
+---
+title: "Illumina_vs_RankProd"
+output: html_document
+date: "`r Sys.Date()`"
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# test rankprod with illumina bead chips
+
+```{r echo=FALSE}
+library(illuminaHumanv4.db)
+library(ggpubr)
+library(GEOquery)
+library(limma)
+library(gplots)
+library(dplyr)
+library(sva)
+library(RankProd)
+library(tidyverse)
+library(plyr)
+library(preprocessCore)
+```
+
+
+
+## Importing the Data
+
+```{r}
+#my_id <- "GSE87105"
+#gse <- getGEO(my_id, GSEMatrix =TRUE)
+#exp<-exprs(gse[[1]])
+```
+
+```{r}
+df <- read_tsv("GSE87105_Non-normalized_data.txt")
+
+cols_to_keep <- colnames(df)[!grepl("^Det", colnames(df))]
+df <- df[, cols_to_keep]
+df <- df[, 1:17]
+df["PROBEID"] = df["ID_REF"]
+df["ID_REF"] = NULL
+```
+
+
+
+```{r}
+## Annotate
+probes = df[["PROBEID"]]
+annotation <- AnnotationDbi::select(illuminaHumanv4.db,
+                                    keys = probes,
+                                    columns = c("SYMBOL", "GENENAME"),
+                                    keytype = "PROBEID")
+annotation <- subset(annotation, !is.na(SYMBOL))
+
+
+
+
+## resolve multi maps. 
+
+ann_grouped <- group_by(annotation, PROBEID)
+ann_sum <- dplyr::summarize(ann_grouped, no_of_matches = n_distinct(SYMBOL))
+
+ann_flt <- filter(ann_sum, no_of_matches > 1)
+
+remove_id <- (rownames(exp) %in% ann_flt$PROBEID)
+
+## Convert PROBEID to SYMBOL
+final_annotation <- subset(annotation, !remove_id)
+convert = final_annotation[c("PROBEID","SYMBOL")]
+
+#exp <- tibble::rownames_to_column(as.data.frame(df), "PROBEID")
+#exp_tmp$PROBEID = rownames(exp_tmp)
+exp = merge(x = as.data.frame(df), y = convert, by = "PROBEID")
+exp["PROBEID"] = NULL
+
+## Collapse duplicate gene symbol
+# Is important to keep always the same method, e.g. keep the highest value OR the mean etc.
+exp = exp %>% group_by(SYMBOL) %>% summarize_all(mean)
+
+## Set SYMBOL as rownames
+
+exp<-data.frame(exp)
+
+exp_long = exp %>%
+  pivot_longer(cols=!SYMBOL,names_to = "sample", values_to = "detected")
+ggplot(exp_long, aes(x=sample, y=detected))+
+  geom_boxplot()
+
+rownames(exp) <- exp[,1]
+exp[,1] <- NULL
+
+
+
+
+norm= normalize.quantiles.robust(as.matrix(exp), copy = TRUE)
+norm = log2(norm)
+
+rownames(norm)=rownames(exp)
+colnames(norm)=colnames(exp)
+#log_norm = log2(norm)
+#cl = gse$GSE87105_series_matrix.txt.gz$`age:ch1`
+#cl <- mapvalues(cl, from = unique(cl), to = seq(length(unique(cl))))
+cl = c(1,1,1,1,1,2,2,2,2,3,3,3,3,3,3,3)
+Y = norm[,1:5]
+M = norm[,6:9]
+O = norm[,10:16]
+YvO = cbind(Y,O)
+YvO_n <- matrix(as.numeric(as.matrix(YvO)),    # Convert to numeric matrix
+                  ncol = ncol(YvO))
+rownames(YvO_n)=rownames(YvO)
+colnames(YvO_n)=colnames(YvO)
+
+cl_YvO = cl[!cl == 2]
+```
+
+```{r}
+
+DEGenes = RankProducts(as.matrix(YvO_n), cl=cl_YvO, logged =TRUE, na.rm = TRUE, 
+                       gene.names = rownames(YvO_n),plot = FALSE,
+                       rand = 123)
+
+```
+
