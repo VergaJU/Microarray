@@ -8,11 +8,195 @@ date: "2023-11-29"
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+
+
+```{r}
+install.packages("sva")
+install.packages("dplyr")
+install.packages("tidyr")
+library(sva)
+library(dplyr)
+library(tidyr)
+```
+
+
+
+
 ## Gettin the microarray data
 
 I have the data on results
 
 ```{r}
-expression = 
+expression_path =  "../batch_correction/Expression.csv"
+  # "../Data/expression_processed/"
+
+
+
+
 ```
+
+
+I decided to go with GB_ACC, I have all the expression already processed on `expression_path`
+
+Here a Function to read and preprocess each CSV file
+
+```{r}
+read_and_preprocess <- function(file_path) {
+  file_path <- paste0(expression_path, file_path)
+  df <- read.csv(file_path)
+  
+  # Check if the 'GB_ACC' column is present
+  if ("GB_ACC" %in% colnames(df)) {
+    return(df)
+  } else {
+    return(NULL)
+  }
+}
+
+
+
+if (!file.exists(expression_path)){
+  # List all CSV files in the directory
+  csv_files <- base::list.files(pattern = "\\.csv$", path = expression_path)
+  
+  # Read and preprocess CSV files, filtering those with the 'GB_ACC' column
+  filtered_dfs <- lapply(csv_files, read_and_preprocess)
+  filtered_dfs <- Filter(Negate(is.null), filtered_dfs)
+  
+  # Check if there are any files with the 'GB_ACC' column
+  if (length(filtered_dfs) == 0) {
+    stop("None of the CSV files have the 'GB_ACC' column.")
+  }
+  
+  length(filtered_dfs)
+} else{
+  filtered_dfs<- read.csv(expression_path)
+  
+}
+
+```
+```{r}
+library(dplyr)
+process_df <- function(df) {
+  # Replace the first column with the 'GB_ACC' column
+  x = make.names(df[,1], unique = TRUE)
+  row.names(df) <- x 
+  df <- df[, -1]
+  
+  return(df)
+}
+
+# Apply the function to each data frame in the list
+filtered_df <- lapply(filtered_dfs, process_df)
+```
+
+
+
+
+```{r}
+# Perform batch correction using ComBat
+# Assuming the 'GB_ACC' column is numeric and all other columns are numeric
+# You may need to modify the model matrix accordingly based on your data
+
+model_matrix <- model.matrix(~1, data = filtered_dfs[[1]])
+
+combat_result <- sva::ComBat(dat = do.call(rbind, filtered_dfs),
+                        batch = factor(rep(1:length(filtered_dfs), sapply(filtered_dfs, nrow))),
+                        mod = model_matrix)
+
+# Create a data frame with the corrected values
+corrected_df <- data.frame(combat_result)
+
+# Save the corrected data to a new CSV file
+write.csv(corrected_df, file = "corrected_data.csv", row.names = FALSE)
+
+# Print a message indicating the process is complete
+cat("Batch correction and merging completed. Corrected data saved to 'corrected_data.csv'.\n")
+```
+
+
+```{r}
+
+# Assuming filtered_df is your list of data frames
+
+# 1. Create dataframe "master_df"
+genes <- lapply(filtered_df, function(df) unique(row.names(df)))
+
+# 2. Assign genes to only the unique values of genes
+unique_genes <- unique(unlist(genes))
+
+# 3. Create master_df as an empty dataframe with the row names as genes
+master_df <- data.frame(stringsAsFactors = FALSE, row.names = unique_genes)
+
+
+# 2. Create an empty list "batches_n"
+batches_n <- list()
+
+# 3. For each df in filtered_df
+for (df in filtered_df) {
+  
+  # 3.1 Count how many columns it has and add it to batches_n
+  batches_n <- c(batches_n, ncol(df))
+  missing_rows <- setdiff(row.names(master_df), row.names(df))
+
+  # Create a dataframe with NAs for the missing rows
+  missing_df <- data.frame(GB_ACC = missing_rows, stringsAsFactors = FALSE, row.names = missing_rows)
+  missing_df[, names(df)] <- NA
+  missing_df <- missing_df[, names(df), drop = FALSE]
+
+  # Bind the missing_df to df
+  df_filled <- rbind(df, missing_df)
+  # 3.2 Append the df to master_df
+  master_df <- cbind(master_df, df_filled)
+  #master_df <- merge(master_df, df, by.x = 0, by.y = 0, all = TRUE)
+
+}
+
+# Convert the list of column counts to a data frame
+batches_n_df <- data.frame(Batch_Column_Count = unlist(batches_n))
+
+```
+
+
+
+
+
+
+```{r}
+distinct_counts <- sapply(master_df, function(x) n_distinct(x))
+
+
+```
+
+
+```{r}
+result_list <- c()
+ind= 0
+for (i in batches_n_df[[1]]) {
+  result_list <- c(result_list, rep(ind, i))
+  ind=ind+1
+}
+result_list
+```
+
+
+```{r}
+
+model_matrix <- model.matrix(~1, data = master_df)
+batches <- factor(result_list)
+model_matrix <- model.matrix(~ 0 + batches)
+
+  # Apply ComBat
+combat_result <- sva::ComBat(dat = master_df,
+                          batch = batches,  # Assuming one batch per data frame
+                          mod = model_matrix)
+```
+```{r}
+master_df
+write.csv(master_df, "master_df")
+```
+
+
+
+
 
